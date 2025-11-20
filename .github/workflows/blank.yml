@@ -1,9 +1,9 @@
-name: Web-RDP-Guacamole
+name: Web-RDP
 on:
   workflow_dispatch:
 
 jobs:
-  rdp:
+  web_rdp:
     runs-on: windows-latest
     timeout-minutes: 360
 
@@ -14,7 +14,7 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Restart-Service -Name TermService -Force
 
-      - name: Create Windows User
+      - name: Create User
         run: |
           $password = "admin@123"
           $secure = ConvertTo-SecureString $password -AsPlainText -Force
@@ -24,30 +24,18 @@ jobs:
           }
 
           Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOX"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "TOOLBOX"
+
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Download Guacamole (WEB UI + guacd)
+      - name: Download WebRDP
         run: |
-          Invoke-WebRequest -Uri "https://archive.apache.org/dist/guacamole/1.5.3/binary/guacamole-1.5.3.war" -OutFile "C:\guacamole.war"
-          Invoke-WebRequest -Uri "https://archive.apache.org/dist/guacamole/1.5.3/binary/guacamole-server-1.5.3.tar.gz" -OutFile "C:\guacd.tar.gz"
+          Invoke-WebRequest -Uri "https://github.com/raveltan/WebRDP/releases/download/v0.2.2/WebRDP-win-x64.zip" -OutFile "C:\WebRDP.zip"
+          Expand-Archive -LiteralPath "C:\WebRDP.zip" -DestinationPath "C:\WebRDP"
 
-      - name: Extract guacd
+      - name: Start WebRDP Server
         run: |
-          tar -xzf C:\guacd.tar.gz -C C:\
-          cd C:\guacamole-server-1.5.3
-          mkdir build
-
-      - name: Run guacd server
-        run: |
-          Start-Process powershell -ArgumentList "cd C:\guacamole-server-1.5.3\src\guacd; python guacd.py" -WindowStyle Hidden
-          Start-Sleep -Seconds 5
-
-      - name: Setup Guacamole Web Server
-        run: |
-          mkdir C:\guacweb
-          Copy-Item C:\guacamole.war C:\guacweb\guacamole.war
-          cd C:\guacweb
-          Start-Process powershell -ArgumentList "python -m http.server 8080" -WindowStyle Hidden
+          Start-Process "C:\WebRDP\WebRDP.exe" -ArgumentList "--port 8080 --username TOOLBOX --password $env:RDP_PASS" -WindowStyle Hidden
           Start-Sleep -Seconds 5
 
       - name: Install cloudflared
@@ -64,11 +52,11 @@ jobs:
 
           echo "CF_URL=$url" >> $env:GITHUB_ENV
 
-      - name: Output Access Info
+      - name: Output Info
         run: |
           Write-Host "==============================="
-          Write-Host "     WINDOWS WEB RDP READY!"
-          Write-Host "OPEN: $env:CF_URL/guacamole"
+          Write-Host " WEB RDP READY (HTML5)"
+          Write-Host "OPEN: $env:CF_URL"
           Write-Host "LOGIN: TOOLBOX"
           Write-Host "PASS: $env:RDP_PASS"
           Write-Host "==============================="
