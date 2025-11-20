@@ -14,55 +14,59 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User
+      - name: Create User
         run: |
           $password = "admin@123"
           $secure = ConvertTo-SecureString $password -AsPlainText -Force
+
           if (-not (Get-LocalUser -Name "TOOLBOX" -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name "TOOLBOX" -Password $secure -PasswordNeverExpires
           }
-          Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOX"
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install noVNC + websockify
+          Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOX"
+          echo "PASS=$password" >> $env:GITHUB_ENV
+
+      - name: Download noVNC
         run: |
           git clone https://github.com/novnc/noVNC.git C:\noVNC
           git clone https://github.com/novnc/websockify.git C:\websockify
 
-      - name: Start websockify RDP Gateway
+      - name: Run noVNC + websockify
         run: |
-          Start-Process powershell `
-            -ArgumentList "cd C:\websockify; python .\websockify.py 6080 localhost:3389" `
-            -WindowStyle Hidden
+          cd C:\websockify
+          Start-Process powershell -ArgumentList "python C:\websockify\websockify.py 6080 localhost:3389" -WindowStyle Hidden
+          Start-Sleep -Seconds 5
+
+      - name: Serve noVNC Files
+        run: |
+          cd C:\noVNC
+          Start-Process powershell -ArgumentList "python -m http.server 6081" -WindowStyle Hidden
           Start-Sleep -Seconds 5
 
       - name: Install cloudflared
         run: |
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\cloudflared.exe"
 
-      - name: Create Cloudflare Quick Tunnel
+      - name: Start Cloudflare Tunnel
         run: |
-          Start-Process -FilePath "C:\cloudflared.exe" `
-            -ArgumentList "tunnel --url http://localhost:6080 --logfile C:\cf.log" `
-            -WindowStyle Hidden
-
+          Start-Process C:\cloudflared.exe -ArgumentList "tunnel --url http://localhost:6081 --logfile C:\cf.log" -WindowStyle Hidden
           Start-Sleep -Seconds 10
-          $out = Get-Content C:\cf.log -Raw
-          $url = ($out | Select-String -Pattern "https://.*?\.trycloudflare\.com").Matches.Value
+
+          $log = Get-Content C:\cf.log -Raw
+          $url = ($log | Select-String -Pattern "https://.*?\.trycloudflare\.com").Matches.Value
           echo "CF_URL=$url" >> $env:GITHUB_ENV
 
-      - name: Show Access Info
+      - name: Output Info
         run: |
           Write-Host "==============================="
-          Write-Host "   WEB RDP READY"
-          Write-Host "URL: $env:CF_URL"
-          Write-Host "User: TOOLBOX"
-          Write-Host "Pass: $env:RDP_PASS"
+          Write-Host " WEB RDP READY"
+          Write-Host "URL: $env:CF_URL/vnc.html?path=websockify"
+          Write-Host "USER: TOOLBOX"
+          Write-Host "PASS: $env:PASS"
           Write-Host "==============================="
 
       - name: Keep Alive
         run: |
           while ($true) {
-            Write-Host "[$(Get-Date)] RDP session active"
             Start-Sleep 300
           }
