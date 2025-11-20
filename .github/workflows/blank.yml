@@ -24,7 +24,7 @@ jobs:
           }
 
           Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOX"
-          echo "PASS=$password" >> $env:GITHUB_ENV
+          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
       - name: Download noVNC
         run: |
@@ -49,20 +49,25 @@ jobs:
 
       - name: Start Cloudflare Tunnel
         run: |
-          Start-Process C:\cloudflared.exe -ArgumentList "tunnel --url http://localhost:6081 --logfile C:\cf.log" -WindowStyle Hidden
+          Start-Process C:\cloudflared.exe -ArgumentList "tunnel --url http://localhost:6080 --logfile C:\cf.log" -WindowStyle Hidden
           Start-Sleep -Seconds 10
 
           $log = Get-Content C:\cf.log -Raw
           $url = ($log | Select-String -Pattern "https://.*?\.trycloudflare\.com").Matches.Value
-          echo "CF_URL=$url" >> $env:GITHUB_ENV
+
+          if ($url) {
+            echo "CF_URL=$url" >> $env:GITHUB_ENV
+          } else {
+            Write-Host "Không tìm thấy URL Cloudflare trong log."
+          }
 
       - name: Output Info
         run: |
           Write-Host "==============================="
-          Write-Host " WEB RDP READY"
+          Write-Host "        WEB RDP READY"
           Write-Host "URL: $env:CF_URL/vnc.html?path=websockify"
           Write-Host "USER: TOOLBOX"
-          Write-Host "PASS: $env:PASS"
+          Write-Host "PASS: $env:RDP_PASS"
           Write-Host "==============================="
 
       - name: Keep Alive
