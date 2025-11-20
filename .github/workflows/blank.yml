@@ -1,4 +1,4 @@
-name: Web-RDP
+name: Web-RDP-Guacamole
 on:
   workflow_dispatch:
 
@@ -14,7 +14,7 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Restart-Service -Name TermService -Force
 
-      - name: Create User
+      - name: Create Windows User
         run: |
           $password = "admin@123"
           $secure = ConvertTo-SecureString $password -AsPlainText -Force
@@ -26,21 +26,28 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOX"
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Download noVNC
+      - name: Download Guacamole (WEB UI + guacd)
         run: |
-          git clone https://github.com/novnc/noVNC.git C:\noVNC
-          git clone https://github.com/novnc/websockify.git C:\websockify
+          Invoke-WebRequest -Uri "https://archive.apache.org/dist/guacamole/1.5.3/binary/guacamole-1.5.3.war" -OutFile "C:\guacamole.war"
+          Invoke-WebRequest -Uri "https://archive.apache.org/dist/guacamole/1.5.3/binary/guacamole-server-1.5.3.tar.gz" -OutFile "C:\guacd.tar.gz"
 
-      - name: Run noVNC + websockify
+      - name: Extract guacd
         run: |
-          cd C:\websockify
-          Start-Process powershell -ArgumentList "python C:\websockify\websockify.py 6080 localhost:3389" -WindowStyle Hidden
+          tar -xzf C:\guacd.tar.gz -C C:\
+          cd C:\guacamole-server-1.5.3
+          mkdir build
+
+      - name: Run guacd server
+        run: |
+          Start-Process powershell -ArgumentList "cd C:\guacamole-server-1.5.3\src\guacd; python guacd.py" -WindowStyle Hidden
           Start-Sleep -Seconds 5
 
-      - name: Serve noVNC Files
+      - name: Setup Guacamole Web Server
         run: |
-          cd C:\noVNC
-          Start-Process powershell -ArgumentList "python -m http.server 6081" -WindowStyle Hidden
+          mkdir C:\guacweb
+          Copy-Item C:\guacamole.war C:\guacweb\guacamole.war
+          cd C:\guacweb
+          Start-Process powershell -ArgumentList "python -m http.server 8080" -WindowStyle Hidden
           Start-Sleep -Seconds 5
 
       - name: Install cloudflared
@@ -49,24 +56,20 @@ jobs:
 
       - name: Start Cloudflare Tunnel
         run: |
-          Start-Process C:\cloudflared.exe -ArgumentList "tunnel --url http://localhost:6080 --logfile C:\cf.log" -WindowStyle Hidden
+          Start-Process C:\cloudflared.exe -ArgumentList "tunnel --url http://localhost:8080 --logfile C:\cf.log" -WindowStyle Hidden
           Start-Sleep -Seconds 10
 
           $log = Get-Content C:\cf.log -Raw
-          $url = ($log | Select-String -Pattern "https://.*?\.trycloudflare\.com").Matches.Value
+          $url = ($log | Select-String -Pattern 'https://.*?\.trycloudflare\.com').Matches.Value
 
-          if ($url) {
-            echo "CF_URL=$url" >> $env:GITHUB_ENV
-          } else {
-            Write-Host "Không tìm thấy URL Cloudflare trong log."
-          }
+          echo "CF_URL=$url" >> $env:GITHUB_ENV
 
-      - name: Output Info
+      - name: Output Access Info
         run: |
           Write-Host "==============================="
-          Write-Host "        WEB RDP READY"
-          Write-Host "URL: $env:CF_URL/vnc.html?path=websockify"
-          Write-Host "USER: TOOLBOX"
+          Write-Host "     WINDOWS WEB RDP READY!"
+          Write-Host "OPEN: $env:CF_URL/guacamole"
+          Write-Host "LOGIN: TOOLBOX"
           Write-Host "PASS: $env:RDP_PASS"
           Write-Host "==============================="
 
